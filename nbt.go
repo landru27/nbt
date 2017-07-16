@@ -6,7 +6,9 @@ package nbt
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"io"
 	"regexp"
 )
@@ -115,6 +117,42 @@ type NBT struct {
 	Name string
 	Size uint32
 	Data interface{}
+}
+
+func (nbt *NBT) UnmarshalJSON(b []byte) (err error) {
+	var n interface{}
+
+	if err := json.Unmarshal(b, &n); err == nil {
+		m := n.(map[string]interface{})
+
+		rt := reflect.TypeOf(m["Data"])
+		rk := rt.Kind()
+
+		t := NBT{}
+
+		t.Type = NBTTAG(m["Type"].(float64))
+		t.List = NBTTAG(m["List"].(float64))
+		t.Name = m["Name"].(string)
+		t.Size = uint32(m["Size"].(float64))
+
+		if (rk == reflect.Array) || (rk == reflect.Slice) {
+			p, e := json.Marshal(m["Data"])
+			if e != nil {
+				return e
+			}
+
+			var q []NBT
+			err = json.Unmarshal(p, &q)
+
+			t.Data = q
+		} else {
+			t.Data = m["Data"]
+		}
+
+		*nbt = t
+	}
+
+	return
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
