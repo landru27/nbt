@@ -121,6 +121,7 @@ type NBT struct {
 
 func (nbt *NBT) UnmarshalJSON(b []byte) (err error) {
 	var n interface{}
+	//fmt.Printf("NBT.UnmarshalJSON : %s\n", b)
 
 	if err := json.Unmarshal(b, &n); err == nil {
 		m := n.(map[string]interface{})
@@ -146,7 +147,40 @@ func (nbt *NBT) UnmarshalJSON(b []byte) (err error) {
 
 			t.Data = q
 		} else {
-			t.Data = m["Data"]
+			switch t.Type {
+			case TAG_End:
+				return nil
+
+			case TAG_Byte:
+				t.Data = byte(m["Data"].(float64))
+			case TAG_Short:
+				t.Data = int16(m["Data"].(float64))
+			case TAG_Int:
+				t.Data = int32(m["Data"].(float64))
+			case TAG_Long:
+				t.Data = int64(m["Data"].(float64))
+			case TAG_Float:
+				t.Data = float32(m["Data"].(float64))
+			case TAG_Double:
+				t.Data = float64(m["Data"].(float64))
+
+			case TAG_Byte_Array:
+				return nil
+
+			case TAG_String:
+				t.Data = m["Data"].(string)
+
+			case TAG_List:
+				return nil
+			case TAG_Compound:
+				return nil
+			case TAG_Int_Array:
+				return nil
+			case TAG_Long_Array:
+				return nil
+			case TAG_NULL:
+				return nil
+			}
 		}
 
 		*nbt = t
