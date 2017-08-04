@@ -8,9 +8,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"io"
-	"regexp"
+	"reflect"
 )
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -38,20 +37,20 @@ import (
 type NBTTAG byte
 
 const (
-	TAG_End        NBTTAG = iota    //  0 : size: 0                 no payload, no name
-	TAG_Byte                        //  1 : size: 1                 signed  8-bit integer
-	TAG_Short                       //  2 : size: 2                 signed 16-bit integer
-	TAG_Int                         //  3 : size: 4                 signed 32-bit integer
-	TAG_Long                        //  4 : size: 8                 signed 64-bit integer
-	TAG_Float                       //  5 : size: 4                 IEEE 754-2008 32-bit floating point number
-	TAG_Double                      //  6 : size: 8                 IEEE 754-2008 64-bit floating point number
-	TAG_Byte_Array                  //  7 : size: 4 + 1*elem        size TAG_Int, then payload [size]byte
-	TAG_String                      //  8 : size: 2 + 4*elem        length TAG_Short, then payload (utf-8) string (of length length)
-	TAG_List                        //  9 : size: 1 + 4 + len*elem  tagID TAG_Byte, length TAG_Int, then payload [length]tagID
-	TAG_Compound                    // 10 : size: varies            { tagID TAG_Byte, name TAG_String, payload tagID }... TAG_End
-	TAG_Int_Array                   // 11 : size: 4 + 4*elem        size TAG_Int, then payload [size]TAG_Int
-	TAG_Long_Array                  // 12 : size: 4 + 8*elem        size TAG_Int, then payload [size]TAG_Long
-	TAG_NULL                        // 13 : local extension of the NBT spec, for indicating 'not yet known', or 'read data to determine', etc.
+	TAG_End        NBTTAG = iota //  0 : size: 0                 no payload, no name
+	TAG_Byte                     //  1 : size: 1                 signed  8-bit integer
+	TAG_Short                    //  2 : size: 2                 signed 16-bit integer
+	TAG_Int                      //  3 : size: 4                 signed 32-bit integer
+	TAG_Long                     //  4 : size: 8                 signed 64-bit integer
+	TAG_Float                    //  5 : size: 4                 IEEE 754-2008 32-bit floating point number
+	TAG_Double                   //  6 : size: 8                 IEEE 754-2008 64-bit floating point number
+	TAG_Byte_Array               //  7 : size: 4 + 1*elem        size TAG_Int, then payload [size]byte
+	TAG_String                   //  8 : size: 2 + 4*elem        length TAG_Short, then payload (utf-8) string (of length length)
+	TAG_List                     //  9 : size: 1 + 4 + len*elem  tagID TAG_Byte, length TAG_Int, then payload [length]tagID
+	TAG_Compound                 // 10 : size: varies            { tagID TAG_Byte, name TAG_String, payload tagID }... TAG_End
+	TAG_Int_Array                // 11 : size: 4 + 4*elem        size TAG_Int, then payload [size]TAG_Int
+	TAG_Long_Array               // 12 : size: 4 + 8*elem        size TAG_Int, then payload [size]TAG_Long
+	TAG_NULL                     // 13 : local extension of the NBT spec, for indicating 'not yet known', or 'read data to determine', etc.
 )
 
 var NBTTAGName = map[NBTTAG]string{
@@ -117,6 +116,58 @@ type NBT struct {
 	Name string
 	Size uint32
 	Data interface{}
+}
+
+func (src *NBT) DeepCopy() (rslt *NBT, err error) {
+	err = nil
+
+	dst := NBT{}
+
+	dst.Type = src.Type
+	dst.List = src.List
+	dst.Name = src.Name
+	dst.Size = src.Size
+
+	rt := reflect.TypeOf(src.Data)
+	rk := rt.Kind()
+
+	if (rk == reflect.Array) || (rk == reflect.Slice) {
+		listnbt := make([]NBT, len(src.Data.([]NBT)))
+
+		for indx, elem := range src.Data.([]NBT) {
+			nxt, _ := elem.DeepCopy()
+			listnbt[indx] = *nxt
+		}
+
+		dst.Data = listnbt
+	} else {
+		switch src.Type {
+		case TAG_End:
+			dst.Data = nil
+
+		case TAG_Byte:
+			dst.Data = src.Data.(byte)
+		case TAG_Short:
+			dst.Data = src.Data.(int16)
+		case TAG_Int:
+			dst.Data = src.Data.(int32)
+		case TAG_Long:
+			dst.Data = src.Data.(int64)
+		case TAG_Float:
+			dst.Data = src.Data.(float32)
+		case TAG_Double:
+			dst.Data = src.Data.(float64)
+		case TAG_String:
+			dst.Data = src.Data.(string)
+
+		default:
+			dst.Data = nil
+		}
+	}
+
+	rslt = &dst
+
+	return
 }
 
 func (nbt *NBT) UnmarshalJSON(b []byte) (err error) {
@@ -188,11 +239,6 @@ func (nbt *NBT) UnmarshalJSON(b []byte) (err error) {
 
 	return
 }
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// declare global variables
-//
-var DataPaths map[string]*NBT
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // define library functions
@@ -614,76 +660,6 @@ func WriteNBTData(buf *bytes.Buffer, src *NBT) (err error) {
 
 	default:
 		return fmt.Errorf("WriteNBTData : TAG type unkown: %d", src.Type)
-	}
-
-	return nil
-}
-
-func BuildDataPaths(data *NBT, datapath string) (err error) {
-	// TAG_End marks the end of a branch in the data hierarchy
-	if data.Type == TAG_End {
-		return nil
-	}
-
-	// if we reach this point with an NBTTAG bearing our internal NULL-type TAG or nil data,
-	// something went wrong somewhere, so we abend
-	if data.Type == TAG_NULL {
-		return fmt.Errorf("BuildDataPaths : attempted to build datapath for a TAG with NULL type")
-	}
-
-	if data.Data == nil {
-		return fmt.Errorf("BuildDataPaths : attempted to build datapath for a TAG witn nil data")
-	}
-
-	// if the Name of this NBTTAG is "LISTELEM", then it is an element of a TAG_List
-	if data.Name != "LISTELEM" {
-		if len(data.Name) > 0 {
-			datapath = datapath + data.Name
-		}
-	}
-	//fmt.Printf("datapath : %s\n", datapath)
-	DataPaths[datapath] = data
-
-	switch data.Type {
-	case TAG_Byte:
-		re := regexp.MustCompile(`/Sections/\d+/Y$`)
-		if re.FindStringIndex(datapath) != nil {
-			yval := data.Data.(byte)
-			datapath = datapath + "/value/" + fmt.Sprintf("%d", yval)
-			DataPaths[datapath] = nil
-			//fmt.Printf("datapath = %s\n", datapath)
-		}
-
-	case TAG_Short:
-	case TAG_Int:
-	case TAG_Long:
-	case TAG_Float:
-	case TAG_Double:
-	case TAG_String:
-	case TAG_Byte_Array:
-	case TAG_Int_Array:
-	case TAG_Long_Array:
-
-	case TAG_List:
-		datapath = datapath + "/"
-
-		arrlen := len(data.Data.([]NBT))
-		for indx := 0; indx < int(arrlen); indx++ {
-			listpath := fmt.Sprintf("%s%d", datapath, indx)
-			ptr := &data.Data.([]NBT)[indx]
-			BuildDataPaths(ptr, listpath)
-		}
-
-	case TAG_Compound:
-		datapath = datapath + "/"
-
-		for indx := range data.Data.([]NBT) {
-			ptr := &data.Data.([]NBT)[indx]
-			BuildDataPaths(ptr, datapath)
-		}
-
-	default:
-		return fmt.Errorf("BuildDataPaths : TAG type unkown: %d", data.Type)
 	}
 
 	return nil
