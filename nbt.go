@@ -13,9 +13,7 @@ import (
 )
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//  declare our internal datatypes and their interfaces  //////////////////////////////////////////////////////////////////////
-
-// NBT datatypes
+//  NBT datatypes  ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 // NBT, Named Binary Tag, is the hierarchical data structure that Minecraft uses to store most game data
 //
@@ -24,8 +22,8 @@ import (
 // TAG_End items are stored as the single byte indicating the type as TAG_End; other TAG types are followed by a name-length
 // and a name, although the name can be empty (so, the length can be zero); _Array types are followed by the number of
 // elements in the array and that number of elements of the appropriate size; TAG_List is followed by a TAG type byte, the
-// number of List elements, and then that number of unnamed TAG items of that type (so, without repeating the type and with
-// no name-length and no name string); TAG_Compound is followed by fully-formed TAG items (including nested TAG_List and
+// number of List elements, and then that number of unnamed TAG items of that type (so, without repeating the type and without
+// a name-length and without a name string); TAG_Compound is followed by fully-formed TAG items (including nested TAG_List and
 // TAG_Compound items) until ended by a TAG_End item
 //
 // TAG types other than TAG_Compound are of the size dictated by either datatype-size or encoded collection (Array, List) size,
@@ -118,6 +116,10 @@ type NBT struct {
 	Data interface{}
 }
 
+// because the NBT datatype has an interface{} element, and because of the extensive use of arrays / slices for that element
+// in order to model the hierarchy of nested NBT data, there are many occassions where a deep copy of an existing NBT object
+// is warranted
+//
 func (src *NBT) DeepCopy() (rslt *NBT, err error) {
 	err = nil
 
@@ -170,9 +172,11 @@ func (src *NBT) DeepCopy() (rslt *NBT, err error) {
 	return
 }
 
+// the ordinary UnmarshalJSON function works just fine for our NBT datatype, but having our own UnmarshalJSON function allows
+// us to assert specific a datatype for those points where we know what specific type of data it is, i.e., the non-nested types
+//
 func (nbt *NBT) UnmarshalJSON(b []byte) (err error) {
 	var n interface{}
-	//fmt.Printf("NBT.UnmarshalJSON : %s\n", b)
 
 	if err := json.Unmarshal(b, &n); err == nil {
 		m := n.(map[string]interface{})
@@ -214,22 +218,10 @@ func (nbt *NBT) UnmarshalJSON(b []byte) (err error) {
 				t.Data = float32(m["Data"].(float64))
 			case TAG_Double:
 				t.Data = float64(m["Data"].(float64))
-
-			case TAG_Byte_Array:
-				return nil
-
 			case TAG_String:
 				t.Data = m["Data"].(string)
 
-			case TAG_List:
-				return nil
-			case TAG_Compound:
-				return nil
-			case TAG_Int_Array:
-				return nil
-			case TAG_Long_Array:
-				return nil
-			case TAG_NULL:
+			default:
 				return nil
 			}
 		}
@@ -251,7 +243,7 @@ func ReadNBTData(r *bytes.Reader, t NBTTAG, debug string) (rtrn NBT, err error) 
 	// NBT item we are reading, start by reading the type from the input data; if we do know (if it's been passed in as
 	// part of the function call), it means we aren't going to find it in the data (chiefly (only?), because we are
 	// reading the elements of a TAG_List item
-
+	//
 	if t == TAG_NULL {
 		tb, err = r.ReadByte()
 		if err != nil {
@@ -266,6 +258,7 @@ func ReadNBTData(r *bytes.Reader, t NBTTAG, debug string) (rtrn NBT, err error) 
 
 	// if the NBT type is TAG_End, there is no further data to read, not even a name, nor even a name-length telling us
 	// there is no name; TAG_End items are just the type indicator itself, which is perfect for how they are used
+	//
 	if tt == TAG_End {
 		return rtrn, nil
 	}
@@ -276,6 +269,7 @@ func ReadNBTData(r *bytes.Reader, t NBTTAG, debug string) (rtrn NBT, err error) 
 	//
 	// the use of the input parameter 't' as a sentinal value for TAG_List elements is used here, too, since TAG_List
 	// elements are nameless, which is differnet from haveing a name of "" : there isn't even a name-length indicator
+	//
 	var strlen int16
 	var name string
 	if t == TAG_NULL {
@@ -302,7 +296,6 @@ func ReadNBTData(r *bytes.Reader, t NBTTAG, debug string) (rtrn NBT, err error) 
 
 	rtrn.Name = name
 
-	// see previous code comments near the main-loop call to ReadNBTData for the purpose of the 'debug' input parameter
 	if debug != "" {
 		debug = debug + fmt.Sprintf("; type %s; name %s", tt, name)
 		fmt.Printf("%s\n", debug)
@@ -475,7 +468,8 @@ func ReadNBTData(r *bytes.Reader, t NBTTAG, debug string) (rtrn NBT, err error) 
 				return rtrn, err
 			}
 
-			// TAG_Compound has no other way to indicate the end of the collection, other than TAG_End
+			// TAG_Compound has no other way to indicate the end of the collection, other than TAG_End; we do
+			// not store this; instead, when will write out a TAG_End after the loop for wrting the TAG_Compound
 			if nbt.Type == TAG_End {
 				break
 			}
