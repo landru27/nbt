@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
 )
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -175,10 +176,21 @@ func (src *NBT) DeepCopy() (rslt *NBT, err error) {
 // the ordinary UnmarshalJSON function works just fine for our NBT datatype, but having our own UnmarshalJSON function allows
 // us to assert specific a datatype for those points where we know what specific type of data it is, i.e., the non-nested types
 //
+// we also use NewDecoder / UseNumber / Decode instead of Unmarshal, so that we can perform more specific conversions, instead
+// of having the json library read every number as a float64; this is crucial for long ints, which Minecraft uses for seeds,
+// UUIDs, and a few other things;  particularly with seeds and UUIDs, the loss of precision from a float64 conversion is fatal
+//
 func (nbt *NBT) UnmarshalJSON(b []byte) (err error) {
 	var n interface{}
+	var ns string
+	var ni int64
+	var nu uint64
+	var nf float64
 
-	if err := json.Unmarshal(b, &n); err == nil {
+	d := json.NewDecoder(bytes.NewReader(b))
+	d.UseNumber()
+
+	if err := d.Decode(&n); err == nil {
 		m := n.(map[string]interface{})
 
 		rt := reflect.TypeOf(m["Data"])
@@ -186,10 +198,19 @@ func (nbt *NBT) UnmarshalJSON(b []byte) (err error) {
 
 		t := NBT{}
 
-		t.Type = NBTTAG(m["Type"].(float64))
-		t.List = NBTTAG(m["List"].(float64))
+		ns = string(m["Type"].(json.Number))
+		ni, _ = strconv.ParseInt(ns, 10, 8)
+		t.Type = NBTTAG(byte(ni))
+
+		ns = string(m["List"].(json.Number))
+		ni, _ = strconv.ParseInt(ns, 10, 8)
+		t.List = NBTTAG(byte(ni))
+
 		t.Name = m["Name"].(string)
-		t.Size = uint32(m["Size"].(float64))
+
+		ns = string(m["Size"].(json.Number))
+		nu, _ = strconv.ParseUint(ns, 10, 32)
+		t.Size = uint32(nu)
 
 		if (rk == reflect.Array) || (rk == reflect.Slice) {
 			p, e := json.Marshal(m["Data"])
@@ -198,7 +219,9 @@ func (nbt *NBT) UnmarshalJSON(b []byte) (err error) {
 			}
 
 			var q []NBT
-			err = json.Unmarshal(p, &q)
+			f := json.NewDecoder(bytes.NewReader(p))
+			f.UseNumber()
+			err = f.Decode(&q)
 
 			t.Data = q
 		} else {
@@ -207,17 +230,29 @@ func (nbt *NBT) UnmarshalJSON(b []byte) (err error) {
 				return nil
 
 			case TAG_Byte:
-				t.Data = byte(m["Data"].(float64))
+				ns = string(m["Data"].(json.Number))
+				ni, _ = strconv.ParseInt(ns, 10, 8)
+				t.Data = byte(ni)
 			case TAG_Short:
-				t.Data = int16(m["Data"].(float64))
+				ns = string(m["Data"].(json.Number))
+				ni, _ = strconv.ParseInt(ns, 10, 16)
+				t.Data = int16(ni)
 			case TAG_Int:
-				t.Data = int32(m["Data"].(float64))
+				ns = string(m["Data"].(json.Number))
+				ni, _ = strconv.ParseInt(ns, 10, 32)
+				t.Data = int32(ni)
 			case TAG_Long:
-				t.Data = int64(m["Data"].(float64))
+				ns = string(m["Data"].(json.Number))
+				ni, _ = strconv.ParseInt(ns, 10, 64)
+				t.Data = ni
 			case TAG_Float:
-				t.Data = float32(m["Data"].(float64))
+				ns = string(m["Data"].(json.Number))
+				nf, _ = strconv.ParseFloat(ns, 32)
+				t.Data = float32(nf)
 			case TAG_Double:
-				t.Data = float64(m["Data"].(float64))
+				ns = string(m["Data"].(json.Number))
+				nf, _ = strconv.ParseFloat(ns, 64)
+				t.Data = nf
 			case TAG_String:
 				t.Data = m["Data"].(string)
 
